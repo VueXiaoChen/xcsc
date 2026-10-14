@@ -1,80 +1,112 @@
 .container {
-  padding: 24rpx;
+  padding: 40rpx 30rpx;
   min-height: 100vh;
   background: #f5f7fa;
   box-sizing: border-box;
-}
-
-.top-actions {
   display: flex;
-  gap: 20rpx;
-  margin-bottom: 20rpx;
+  flex-direction: column;
 }
 
-.scan-btn {
+/* ===== 三个按钮外层 ===== */
+.action-wrapper {
+  width: 100%;
+}
+
+/* 无扫描结果时垂直居中 */
+.action-wrapper-center {
   flex: 1;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  color: #fff;
-  border-radius: 20rpx;
-  padding: 30rpx 36rpx;
-  box-shadow: 0 8rpx 24rpx rgba(59, 130, 246, 0.3);
-  position: relative;
-  overflow: hidden;
 }
 
-.scan-btn::after {
+.action-list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24rpx;
+  margin-bottom: 40rpx;
+}
+
+.action-btn {
+  width: 100%;
+  border-radius: 24rpx;
+  padding: 40rpx 36rpx;
+  box-sizing: border-box;
+  position: relative;
+  overflow: hidden;
+  text-align: center;
+}
+
+.action-btn::after {
   content: '';
   position: absolute;
-  right: -40rpx;
-  top: -40rpx;
-  width: 160rpx;
-  height: 160rpx;
-  background: rgba(255,255,255,0.1);
+  right: -60rpx;
+  top: -60rpx;
+  width: 200rpx;
+  height: 200rpx;
+  background: rgba(255,255,255,0.08);
   border-radius: 50%;
 }
 
-.scan-btn.disabled { opacity: 0.6; }
-
-.scan-title {
-  font-size: 36rpx;
-  font-weight: bold;
-  margin-bottom: 8rpx;
-  letter-spacing: 2rpx;
+.action-btn:active {
+  opacity: 0.9;
+  transform: scale(0.99);
 }
 
-.scan-sub {
-  font-size: 22rpx;
+.action-btn.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.action-title {
+  font-size: 40rpx;
+  font-weight: bold;
+  letter-spacing: 2rpx;
+  margin-bottom: 10rpx;
+}
+
+.action-sub {
+  font-size: 24rpx;
   opacity: 0.85;
   letter-spacing: 1rpx;
 }
 
-.history-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 140rpx;
-  background: #fff;
-  border-radius: 20rpx;
-  box-shadow: 0 8rpx 24rpx rgba(0,0,0,0.06);
+.action-multi {
+  background: linear-gradient(135deg, #34d399, #10b981);
+  color: #fff;
+  box-shadow: 0 10rpx 30rpx rgba(16, 185, 129, 0.3);
 }
 
-.history-text {
-  font-size: 30rpx;
+.action-scan {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: #fff;
+  box-shadow: 0 10rpx 30rpx rgba(59, 130, 246, 0.3);
+}
+
+.action-history {
+  background: #fff;
   color: #3b82f6;
-  font-weight: bold;
-  letter-spacing: 4rpx;
+  box-shadow: 0 6rpx 20rpx rgba(0,0,0,0.06);
+}
+
+.action-history .action-title {
+  color: #3b82f6;
+}
+
+.action-history .action-sub {
+  color: #94a3b8;
+  opacity: 1;
 }
 
 .tip {
   text-align: center;
   color: #94a3b8;
   font-size: 26rpx;
-  margin: 40rpx 0;
+  margin: 20rpx 0 40rpx;
 }
 
+/* ===== 数据区 ===== */
 .picker-area {
   background: #fff;
   border-radius: 20rpx;
@@ -232,7 +264,6 @@
   margin-bottom: 12rpx;
 }
 
-/* ⭐ 当前库位下拉框 */
 .picker-value {
   padding: 0 24rpx;
   height: 96rpx;
@@ -362,26 +393,6 @@
   margin-top: 30rpx;
 }
 
-.btn-oos {
-  flex: 1;
-  height: 96rpx;
-  line-height: 96rpx;
-  border-radius: 48rpx;
-  font-size: 32rpx;
-  font-weight: bold;
-  color: #fff;
-  text-align: center;
-  letter-spacing: 2rpx;
-  background: linear-gradient(135deg, #fb923c, #ea580c);
-  box-shadow: 0 8rpx 24rpx rgba(251, 146, 60, 0.3);
-}
-
-.btn-oos:active {
-  opacity: 0.85;
-  transform: scale(0.98);
-  transition: all 0.1s;
-}
-
 .btn-confirm {
   flex: 1;
   height: 96rpx;
@@ -396,7 +407,22 @@
   box-shadow: 0 8rpx 24rpx rgba(59, 130, 246, 0.35);
 }
 
-.btn-confirm:active {
+.btn-oos {
+  flex: 1;
+  height: 96rpx;
+  line-height: 96rpx;
+  border-radius: 48rpx;
+  font-size: 32rpx;
+  font-weight: bold;
+  color: #fff;
+  text-align: center;
+  letter-spacing: 2rpx;
+  background: linear-gradient(135deg, #fb923c, #ea580c);
+  box-shadow: 0 8rpx 24rpx rgba(251, 146, 60, 0.3);
+}
+
+.btn-confirm:active,
+.btn-oos:active {
   opacity: 0.85;
   transform: scale(0.98);
   transition: all 0.1s;

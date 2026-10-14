@@ -1,0 +1,91 @@
+<view class="container">
+
+<view class="upload-wrap" wx:if="{{!grouped.length}}">
+  <view class="upload-btn {{loading ? 'disabled' : ''}}" bindtap="chooseAndRecognize">
+    <view class="upload-title">{{loading ? '正在处理中...' : '上传多张拣货单'}}</view>
+    <view class="upload-sub">支持一次选择多张图片，自动提取 SO</view>
+  </view>
+  <view class="tip">每张单子的 SO 号会被自动识别，同一个库位的商品会合并展示</view>
+</view>
+
+<block wx:if="{{grouped.length > 0}}">
+  <view class="top-bar">
+    <view class="progress-text">
+      进度: 第 <text class="num">{{currentIndex + 1}}</text> / {{grouped.length}} 个库位
+    </view>
+    <view class="progress-bar">
+      <view class="progress-fill" style="width: {{(currentIndex + 1) / grouped.length * 100}}%"></view>
+    </view>
+    <view class="reset-btn" bindtap="resetAll">重新开始</view>
+  </view>
+
+  <view class="loc-card" wx:if="{{currentLoc}}">
+    <!-- 库位头部 -->
+    <view class="loc-header">
+      <view class="loc-tag">库位</view>
+      <view class="loc-name">{{currentLoc.location}}</view>
+      <view class="loc-summary">
+        本库位共 {{currentLoc.products.length}} 种商品
+      </view>
+    </view>
+
+    <!-- 商品组 -->
+    <view
+      class="product-block"
+      wx:for="{{currentLoc.products}}"
+      wx:for-item="prod"
+      wx:for-index="pi"
+      wx:key="key"
+    >
+      <!-- 商品信息：SKU + 颜色尺码（只显示一次） -->
+      <view class="product-info">
+        <view class="info-row">
+          <text class="i-label">SKU</text>
+          <text class="i-value sku">{{prod.sku}}</text>
+        </view>
+        <view class="info-row">
+          <text class="i-label">颜色/尺码</text>
+          <text class="i-value">{{prod.spec}}</text>
+        </view>
+        <view class="info-row total-row">
+          <text class="i-label">合计拣货</text>
+          <text class="i-value qty">{{prod.total}}</text>
+        </view>
+      </view>
+
+      <!-- SO 分配：每个 SO 一个横幅 + 数量 -->
+      <view class="so-list">
+        <view
+          class="so-item"
+          wx:for="{{prod.soList}}"
+          wx:for-item="so"
+          wx:for-index="si"
+          wx:key="soNumber"
+        >
+          <view class="so-banner {{si % 4 === 0 ? 'so-red' : (si % 4 === 1 ? 'so-orange' : (si % 4 === 2 ? 'so-purple' : 'so-teal'))}}">
+            📦 订单 SO: {{so.soNumber}}
+          </view>
+          <view class="so-qty-row">
+            <text class="so-qty-label">拣货数量</text>
+            <text class="so-qty-num">{{so.quantity}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="all-done" wx:if="{{allDone}}">
+    ✅ 已全部处理完成
+  </view>
+
+  <view class="bottom-bar">
+    <view class="btn-oos {{allDone ? 'btn-disabled' : ''}}" bindtap="onOutOfStock">
+      报缺货
+    </view>
+    <view class="btn-confirm {{allDone ? 'btn-disabled' : ''}}" bindtap="onConfirm">
+      确认，下一个库位
+    </view>
+  </view>
+</block>
+
+</view>

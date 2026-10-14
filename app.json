@@ -1,14 +1,17 @@
 {
   "pages": [
-    "pages/index/index",
+    "pages/home/home",
+    "pages/scan/scan",
+    "pages/multi/multi",
     "pages/history/history",
     "pages/detail/detail",
-    "pages/all/all"
+    "pages/all/all",
+    "pages/setup/setup"
   ],
   "window": {
     "backgroundTextStyle": "light",
     "navigationBarBackgroundColor": "#fff",
-    "navigationBarTitleText": "拣货单识别助手",
+    "navigationBarTitleText": "拣货助手",
     "navigationBarTextStyle": "black"
   },
   "style": "v2",

@@ -1,5 +1,6 @@
 // pages/index/index.js
 const crypto = require('../../utils/crypto.js');
+const { preprocessImage } = require('../../utils/imageProcess.js');
 
 const HISTORY_KEY  = 'pick_history';
 const ALL_ITEMS_KEY = 'pick_all_items';
@@ -69,11 +70,15 @@ Page({
   },
 
   onLoad() {
+    // ⭐ 未配置密钥时强制去配置页（如果不想要这功能可删掉这段）
+    const cfg = wx.getStorageSync('tc_secret_config');
+    if (!cfg || !cfg.secretId || !cfg.secretKey) {
+      // 如果你还是用硬编码密钥，就把这段删除
+    }
     this.restoreState();
   },
 
   onShow() {
-    // ⭐ 每次回到首页都校验状态（防止 history 清空后 state 残留）
     this.restoreState();
   },
 
@@ -82,12 +87,10 @@ Page({
     const state = wx.getStorageSync(STATE_KEY);
     if (!state || !state.tableData || state.tableData.length === 0) return;
 
-    // ⭐ 校验批次是否还存在
     const history = wx.getStorageSync(HISTORY_KEY) || [];
     const batchExists = state.currentBatchId && history.some(b => b.id === state.currentBatchId);
 
     if (!batchExists) {
-      // 批次已被清空，清理首页状态
       wx.removeStorageSync(STATE_KEY);
       this.setData({
         tableData: [],
@@ -203,26 +206,47 @@ Page({
         const files = res.tempFiles.map(f => f.tempFilePath);
         if (files.length === 0) return;
 
-        Promise.all(files.map(fp => this.compressImage(fp)))
-          .then(compressedPaths => this.recognizeAll(compressedPaths))
-          .catch(err => {
-            console.error('处理失败:', err);
+        wx.showLoading({ title: '图像处理中...' });
+
+        this.processAll(files)
+          .then(processed => {
             wx.hideLoading();
+            this.recognizeAll(processed);
+          })
+          .catch(err => {
+            wx.hideLoading();
+            console.error('处理失败:', err);
             wx.showToast({ title: '处理失败', icon: 'none' });
           });
       }
     });
   },
 
-  compressImage(filePath) {
-    return new Promise((resolve) => {
-      wx.compressImage({
-        src: filePath,
-        quality: 70,
-        success: (r) => resolve(r.tempFilePath),
-        fail: () => resolve(filePath)
-      });
-    });
+  // ⭐ 逐张处理：压缩 → 去阴影 + 对比度增强
+  async processAll(files) {
+    const result = [];
+    for (let i = 0; i < files.length; i++) {
+      wx.showLoading({ title: `处理第 ${i + 1}/${files.length} 张...` });
+      try {
+        // 1. 压缩
+        const compressed = await new Promise((resolve) => {
+          wx.compressImage({
+            src: files[i],
+            quality: 85,
+            success: (r) => resolve(r.tempFilePath),
+            fail: () => resolve(files[i])
+          });
+        });
+
+        // 2. 去阴影 + 对比度增强
+        const processed = await preprocessImage(compressed);
+        result.push(processed);
+      } catch (e) {
+        console.warn(`第 ${i + 1} 张处理失败，用原图`, e);
+        result.push(files[i]);
+      }
+    }
+    return result;
   },
 
   async recognizeAll(filePaths) {
@@ -255,7 +279,6 @@ Page({
       return;
     }
 
-    // 按 uid 去重
     const seen = {};
     const parsed = [];
     allItems.forEach(item => {
@@ -267,10 +290,8 @@ Page({
     const sorted = sortByArea(parsed);
     const fingerprint = makeFingerprint(sorted);
 
-    // ⭐ 立即把这一批写入总记录
     this.saveBatchToAllItems(sorted);
 
-    // 检查是否重复订单
     const duplicated = this.findBatchByFingerprint(fingerprint);
 
     if (duplicated) {
@@ -360,6 +381,10 @@ Page({
 
   recognizeOne(filePath) {
     return new Promise((resolve, reject) => {
+      const cfg = wx.getStorageSync('tc_secret_config');
+      const secretId = (cfg && cfg.secretId) || 'AKIDGXceU6VkmdHixzoQtoW5VikbFkw9HPch';
+      const secretKey = (cfg && cfg.secretKey) || 'BKWXN1Tr58ydR7ey99xYMybCexAC1gFj';
+
       const fs = wx.getFileSystemManager();
       let base64Img;
       try {
@@ -367,9 +392,6 @@ Page({
       } catch (e) {
         return reject(e);
       }
-
-      const secretId = 'AKIDGXceU6VkmdHixzoQtoW5VikbFkw9HPch';
-      const secretKey = 'BKWXN1Tr58ydR7ey99xYMybCexAC1gFj';
 
       const endpoint = 'ocr.tencentcloudapi.com';
       const service = 'ocr';
@@ -399,6 +421,14 @@ Page({
         data: payload,
         success: (res) => {
           if (res.data.Response && res.data.Response.Error) {
+            const code = res.data.Response.Error.Code || '';
+            if (code.startsWith('AuthFailure')) {
+              wx.showModal({
+                title: '密钥验证失败',
+                content: res.data.Response.Error.Message,
+                showCancel: false
+              });
+            }
             return reject(new Error(res.data.Response.Error.Message));
           }
           if (res.data.Response &&
@@ -495,7 +525,6 @@ Page({
     wx.setStorageSync(HISTORY_KEY, history);
   },
 
-  // ⭐ 整批写入总记录（按 uid 去重，保留状态）
   saveBatchToAllItems(items) {
     const allItems = wx.getStorageSync(ALL_ITEMS_KEY) || [];
     const map = {};
@@ -504,7 +533,6 @@ Page({
     items.forEach(item => {
       const existing = map[item.uid];
       if (existing) {
-        // 保留已有的状态（已确认 / 缺货）
         existing.location = item.location || existing.location;
         existing.spec = item.spec || existing.spec;
         existing.sku = item.sku || existing.sku;
@@ -527,7 +555,6 @@ Page({
     wx.setStorageSync(ALL_ITEMS_KEY, Object.values(map));
   },
 
-  // 单条更新总记录
   updateAllItem(item) {
     if (!item) return;
     const allItems = wx.getStorageSync(ALL_ITEMS_KEY) || [];
@@ -559,7 +586,6 @@ Page({
     const item = batch.items.find(i => i.uid === uid);
     if (item) {
       Object.assign(item, updates, { time: Date.now() });
-      // 同步更新总记录
       this.updateAllItem(item);
     }
 
@@ -700,5 +726,8 @@ Page({
 
   goHistory() {
     wx.navigateTo({ url: '/pages/history/history' });
-  }
+  },
+  goMulti() {
+    wx.navigateTo({ url: '/pages/multi/multi' });
+  },
 });

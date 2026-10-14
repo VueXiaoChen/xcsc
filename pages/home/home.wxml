@@ -1,0 +1,18 @@
+<view class="container">
+  <view class="action-list">
+    <view class="action-btn action-multi" bindtap="goMulti">
+      <view class="action-title">多张拣货单</view>
+      <view class="action-sub">批量识别，一单一条</view>
+    </view>
+
+    <view class="action-btn action-scan" bindtap="goScan">
+      <view class="action-title">扫描拣货单</view>
+      <view class="action-sub">支持一次选择多张图片</view>
+    </view>
+
+    <view class="action-btn action-history" bindtap="goHistory">
+      <view class="action-title">历史</view>
+      <view class="action-sub">查看扫描记录</view>
+    </view>
+  </view>
+</view>

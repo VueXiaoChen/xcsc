@@ -1,0 +1,128 @@
+<view class="container">
+  <!-- 顶部扫描按钮 -->
+  <view class="scan-btn {{loading ? 'disabled' : ''}}" bindtap="chooseAndRecognize">
+    <view class="scan-title">{{loading ? '正在识别中...' : '扫描拣货单'}}</view>
+    <view class="scan-sub">支持一次选择多张图片</view>
+  </view>
+
+  <view class="tip" wx:if="{{tableData.length === 0 && !loading}}">
+    点击上方按钮，选择或拍摄拣货单
+  </view>
+
+  <!-- 扫描结果区 -->
+  <view class="picker-area" wx:if="{{currentItem}}">
+    <view class="search-row">
+      <view class="search-bar">
+        <input
+          class="search-input"
+          placeholder="输入关键词..."
+          value="{{keyword}}"
+          bindinput="onSearchInput"
+          confirm-type="search"
+        />
+        <view class="search-clear" wx:if="{{keyword}}" bindtap="clearSearch">×</view>
+      </view>
+
+      <picker
+        class="field-picker"
+        mode="selector"
+        range="{{fieldOptions}}"
+        range-key="label"
+        value="{{fieldIndex}}"
+        bindchange="onFieldChange"
+      >
+        <view class="field-picker-value">
+          {{fieldOptions[fieldIndex].label}} ▾
+        </view>
+      </picker>
+    </view>
+
+    <view class="search-result-list" wx:if="{{keyword && filteredList.length > 0}}">
+      <scroll-view scroll-y="true" class="result-scroll">
+        <view
+          class="result-item {{item.uid === currentItem.uid ? 'result-item-active' : ''}}"
+          wx:for="{{filteredList}}"
+          wx:key="uid"
+          bindtap="onResultTap"
+          data-uid="{{item.uid}}"
+        >
+          <view class="result-left">
+            <view class="result-loc">{{item.location}}</view>
+            <view class="result-spec">{{item.spec}}</view>
+          </view>
+          <view class="result-right">
+            <view class="result-qty">×{{item.quantity}}</view>
+            <view class="{{item.confirmed ? 'tag-ok-sm' : (item.outOfStock ? 'tag-oos-sm' : 'tag-pending-sm')}}">
+              {{item.confirmed ? '已确认' : (item.outOfStock ? '缺货' : '待捡货')}}
+            </view>
+          </view>
+        </view>
+      </scroll-view>
+    </view>
+
+    <view class="no-result" wx:if="{{keyword && filteredList.length === 0}}">
+      没有匹配的记录
+    </view>
+
+    <view class="picker-label">当前拣货库位：</view>
+    <picker
+      mode="selector"
+      range="{{tableData}}"
+      range-key="location"
+      value="{{currentIndex}}"
+      bindchange="onCurrentPickerChange"
+    >
+      <view class="picker-value">
+        <text class="loc-text">{{currentItem.location}}</text>
+        <text class="loc-arrow">▾</text>
+      </view>
+    </picker>
+
+    <view class="card">
+      <view class="card-row">
+        <text class="label">拣货库位</text>
+        <text class="value">{{currentItem.location}}</text>
+      </view>
+      <view class="card-row">
+        <text class="label">颜色_尺码</text>
+        <text class="value">{{currentItem.spec}}</text>
+      </view>
+      <view class="card-row">
+        <text class="label">数量</text>
+        <text class="value qty-text">{{currentItem.quantity}}</text>
+      </view>
+      <view class="card-row">
+        <text class="label">SKU</text>
+        <text class="value sku-text">{{currentItem.sku}}</text>
+      </view>
+      <view class="status-row">
+        <text wx:if="{{currentItem.confirmed}}" class="status-confirmed">已确认</text>
+        <text wx:elif="{{currentItem.outOfStock}}" class="status-oos">缺货</text>
+        <text wx:else class="status-pending">待捡货</text>
+      </view>
+    </view>
+
+    <view class="progress">
+      第 <text class="progress-num">{{currentIndex + 1}}</text> / {{tableData.length}} 条
+    </view>
+
+    <view class="all-done" wx:if="{{allDone}}">
+      已全部处理完成
+    </view>
+
+    <view class="btn-group">
+      <view
+        class="btn-confirm {{allDone ? 'btn-disabled' : ''}}"
+        bindtap="onConfirm"
+      >
+        {{allDone ? '已完成' : '确认，下一条'}}
+      </view>
+      <view
+        class="btn-oos {{allDone ? 'btn-disabled' : ''}}"
+        bindtap="onOutOfStock"
+      >
+        缺货，下一条
+      </view>
+    </view>
+  </view>
+</view>

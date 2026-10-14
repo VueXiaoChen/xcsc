@@ -1,13 +1,21 @@
 <view class="container">
-  <!-- 顶部按钮区 -->
-  <view class="top-actions">
-    <view class="scan-btn {{loading ? 'disabled' : ''}}" bindtap="chooseAndRecognize">
-      <view class="scan-title">{{loading ? '正在识别中...' : '扫描拣货单'}}</view>
-      <view class="scan-sub">支持一次选择多张图片</view>
-    </view>
+  <!-- 三个按钮外层：无扫描结果时垂直居中 -->
+  <view class="action-wrapper {{tableData.length === 0 ? 'action-wrapper-center' : ''}}">
+    <view class="action-list">
+      <view class="action-btn action-multi" bindtap="goMulti">
+        <view class="action-title">多张拣货单</view>
+        <view class="action-sub">批量识别，一单一条</view>
+      </view>
 
-    <view class="history-btn" bindtap="goHistory">
-      <view class="history-text">历史</view>
+      <view class="action-btn action-scan {{loading ? 'disabled' : ''}}" bindtap="chooseAndRecognize">
+        <view class="action-title">{{loading ? '正在识别中...' : '扫描拣货单'}}</view>
+        <view class="action-sub">支持一次选择多张图片</view>
+      </view>
+
+      <view class="action-btn action-history" bindtap="goHistory">
+        <view class="action-title">历史</view>
+        <view class="action-sub">查看扫描记录</view>
+      </view>
     </view>
   </view>
 
@@ -15,8 +23,8 @@
     请拍摄或上传清晰的波次拣货清单
   </view>
 
+  <!-- 扫描结果区 -->
   <view class="picker-area" wx:if="{{currentItem}}">
-    <!-- 搜索框 + 字段下拉框 同一行 -->
     <view class="search-row">
       <view class="search-bar">
         <input
@@ -43,7 +51,6 @@
       </picker>
     </view>
 
-    <!-- 搜索结果列表 -->
     <view class="search-result-list" wx:if="{{keyword && filteredList.length > 0}}">
       <scroll-view scroll-y="true" class="result-scroll">
         <view
@@ -71,7 +78,6 @@
       没有匹配的记录
     </view>
 
-    <!-- 当前拣货库位：下拉框 -->
     <view class="picker-label">当前拣货库位：</view>
     <picker
       mode="selector"
@@ -118,7 +124,6 @@
       已全部处理完成
     </view>
 
-    <!-- 两个按钮并排：确认在左，缺货在右 -->
     <view class="btn-group">
       <view
         class="btn-confirm {{allDone ? 'btn-disabled' : ''}}"
