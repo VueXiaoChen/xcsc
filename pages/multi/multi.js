@@ -2,9 +2,14 @@
 const crypto = require('../../utils/crypto.js');
 const { preprocessImage } = require('../../utils/imageProcess.js');
 
-const HISTORY_KEY  = 'pick_history';      // ⭐ 扫描批次记录
-const ALL_ITEMS_KEY = 'pick_all_items';   // ⭐ 总历史记录
+const HISTORY_KEY  = 'pick_history';
+const ALL_ITEMS_KEY = 'pick_all_items';
 const STATE_KEY    = 'multi_state';
+
+// ⭐ 判断库位是否包含大写字母
+function hasUpperCase(str) {
+  return /[A-Z]/.test(str || '');
+}
 
 Page({
   data: {
@@ -17,7 +22,7 @@ Page({
     showThumbModal: false,
     handledBatches: [],
     unhandledBatches: [],
-    currentBatchId: ''      // ⭐ 本次任务的批次 id
+    currentBatchId: ''
   },
 
   onLoad() {
@@ -64,8 +69,7 @@ Page({
     });
   },
 
-  // ============ 历史记录写入 ============
-  // ⭐ 把识别到的所有明细写入 pick_all_items（去重）
+  // ============ 历史记录 ============
   saveBatchToAllItems() {
     const { batches } = this.data;
     if (!batches.length) return;
@@ -102,12 +106,10 @@ Page({
     wx.setStorageSync(ALL_ITEMS_KEY, Object.values(map));
   },
 
-  // ⭐ 把本次任务写入 pick_history（一个任务 = 一个批次）
   saveBatchToHistory() {
     const { batches, grouped, currentBatchId } = this.data;
     if (!batches.length || !currentBatchId) return;
 
-    // 把每个批次里的明细展平，并打上 SO 号 + 该库位状态
     const items = [];
     batches.forEach(batch => {
       batch.items.forEach(item => {
@@ -142,7 +144,6 @@ Page({
     wx.setStorageSync(HISTORY_KEY, history);
   },
 
-  // ⭐ 更新历史里的库位状态
   updateHistoryLocStatus() {
     const { batches, grouped, currentBatchId } = this.data;
     if (!currentBatchId) return;
@@ -162,7 +163,6 @@ Page({
     wx.setStorageSync(HISTORY_KEY, history);
   },
 
-  // ⭐ 同步更新总记录里的状态
   updateAllItemsStatus() {
     const { grouped } = this.data;
     const allItems = wx.getStorageSync(ALL_ITEMS_KEY) || [];
@@ -171,14 +171,12 @@ Page({
 
     grouped.forEach(g => {
       g.products.forEach(prod => {
-        prod.soList.forEach(so => {
-          const uid = `${g.location}__${prod.spec}__${prod.sku}`;
-          if (map[uid]) {
-            map[uid].confirmed = !!g.confirmed;
-            map[uid].outOfStock = !!g.outOfStock;
-            map[uid].lastTime = Date.now();
-          }
-        });
+        const uid = `${g.location}__${prod.spec}__${prod.sku}`;
+        if (map[uid]) {
+          map[uid].confirmed = !!g.confirmed;
+          map[uid].outOfStock = !!g.outOfStock;
+          map[uid].lastTime = Date.now();
+        }
       });
     });
 
@@ -247,11 +245,27 @@ Page({
 
   async processSequentially(files, idx, accumulated) {
     if (idx >= files.length) {
-      if (accumulated.length === 0) {
-        wx.showToast({ title: '未识别到任何内容', icon: 'none' });
+      // ⭐ 校验是否有含大写字母的库位
+      const hasValid = accumulated.some(batch =>
+        batch.items.some(item => hasUpperCase(item.location))
+      );
+
+      if (accumulated.length === 0 || !hasValid) {
+        wx.showModal({
+          title: '未识别到有效库位',
+          content: '这次上传的图片里没有识别到包含大写字母的库位，请检查拍摄是否清晰，或换几张重试。',
+          showCancel: false,
+          confirmText: '返回',
+          success: () => {
+            wx.navigateBack({
+              fail: () => wx.reLaunch({ url: '/pages/home/home' })
+            });
+          }
+        });
         this.setData({ loading: false });
         return;
       }
+
       const grouped = this.buildGrouped(accumulated);
       const batchId = 'multi_' + Date.now();
 
@@ -265,7 +279,6 @@ Page({
         currentBatchId: batchId
       });
 
-      // ⭐ 写入两个历史记录
       this.saveBatchToAllItems();
       this.saveBatchToHistory();
       this.saveState();
@@ -342,8 +355,12 @@ Page({
       this.callOCR(secretId, secretKey, 'GeneralAccurateOCR', base64Img)
     ]);
 
+    const items = this.parseTable(tableRes);
+    // ⭐ 只保留库位含大写字母的行
+    const valid = items.filter(i => hasUpperCase(i.location));
+
     return {
-      items: this.parseTable(tableRes),
+      items: valid,
       soNumber: this.extractSO(generalRes)
     };
   },
@@ -443,8 +460,10 @@ Page({
     for (let r = 1; r <= maxRow; r++) {
       const row = matrix[r];
       if (!row || row.filter(v => v).length < 2) continue;
-      const location = locationIdx >= 0 ? row[locationIdx] : '';
+      const location = locationIdx >= 0 ? (row[locationIdx] || '').trim() : '';
       if (!location) continue;
+      // ⭐ 库位必须包含大写字母
+      if (!hasUpperCase(location)) continue;
 
       list.push({
         location,

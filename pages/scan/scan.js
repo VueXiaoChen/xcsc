@@ -15,6 +15,11 @@ const FIELD_OPTIONS = [
   { label: '全部', value: 'all' }
 ];
 
+// ⭐ 判断库位是否包含大写字母
+function hasUpperCase(str) {
+  return /[A-Z]/.test(str || '');
+}
+
 function makeUid(item) {
   return `${item.location}__${item.spec}__${item.sku}`;
 }
@@ -69,13 +74,8 @@ Page({
     currentBatchId: ''
   },
 
-  onLoad() {
-    this.restoreState();
-  },
-
-  onShow() {
-    this.restoreState();
-  },
+  onLoad() { this.restoreState(); },
+  onShow() { this.restoreState(); },
 
   restoreState() {
     const state = wx.getStorageSync(STATE_KEY);
@@ -119,11 +119,9 @@ Page({
   refreshFilteredList() {
     const { tableData, keyword, fieldOptions, fieldIndex } = this.data;
     let filteredList = tableData;
-
     if (keyword) {
       const kw = keyword.toLowerCase();
       const field = fieldOptions[fieldIndex].value;
-
       filteredList = tableData.filter(i => {
         if (field === 'location') return (i.location || '').toLowerCase().includes(kw);
         if (field === 'spec') return (i.spec || '').toLowerCase().includes(kw);
@@ -133,48 +131,31 @@ Page({
                (i.sku || '').toLowerCase().includes(kw);
       });
     }
-
     this.setData({ filteredList });
   },
 
   onSearchInput(e) {
-    this.setData({ keyword: (e.detail.value || '').trim() }, () => {
-      this.refreshFilteredList();
-    });
+    this.setData({ keyword: (e.detail.value || '').trim() }, () => this.refreshFilteredList());
   },
-
   onFieldChange(e) {
     const idx = parseInt(e.detail.value);
     if (idx === this.data.fieldIndex) return;
-    this.setData({ fieldIndex: idx }, () => {
-      this.refreshFilteredList();
-    });
+    this.setData({ fieldIndex: idx }, () => this.refreshFilteredList());
   },
-
   clearSearch() {
-    this.setData({ keyword: '' }, () => {
-      this.refreshFilteredList();
-    });
+    this.setData({ keyword: '' }, () => this.refreshFilteredList());
   },
-
   onResultTap(e) {
     const uid = e.currentTarget.dataset.uid;
     const realIdx = this.data.tableData.findIndex(i => i.uid === uid);
     if (realIdx < 0) return;
-    this.setData({
-      currentIndex: realIdx,
-      currentItem: this.data.tableData[realIdx]
-    });
+    this.setData({ currentIndex: realIdx, currentItem: this.data.tableData[realIdx] });
     this.saveState();
   },
-
   onCurrentPickerChange(e) {
     const idx = parseInt(e.detail.value);
     if (idx < 0 || idx >= this.data.tableData.length) return;
-    this.setData({
-      currentIndex: idx,
-      currentItem: this.data.tableData[idx]
-    });
+    this.setData({ currentIndex: idx, currentItem: this.data.tableData[idx] });
     this.saveState();
   },
 
@@ -238,8 +219,19 @@ Page({
     }
     wx.hideLoading();
 
+    // ⭐ 无有效库位则提示返回
     if (allItems.length === 0) {
-      wx.showToast({ title: '未识别到任何内容', icon: 'none' });
+      wx.showModal({
+        title: '未识别到有效库位',
+        content: '这张单子上没有识别到包含大写字母的库位，请检查拍摄是否清晰，或换一张重试。',
+        showCancel: false,
+        confirmText: '返回',
+        success: () => {
+          wx.navigateBack({
+            fail: () => wx.reLaunch({ url: '/pages/home/home' })
+          });
+        }
+      });
       this.setData({ loading: false });
       return;
     }
@@ -372,8 +364,12 @@ Page({
           if (res.data.Response &&
               res.data.Response.TableDetections &&
               res.data.Response.TableDetections.length > 0) {
-            try { resolve(this.parseOne(res.data.Response.TableDetections)); }
-            catch (e) { reject(e); }
+            try {
+              const items = this.parseOne(res.data.Response.TableDetections);
+              // ⭐ 只保留库位含大写字母的行
+              const valid = items.filter(i => hasUpperCase(i.location));
+              resolve(valid);
+            } catch (e) { reject(e); }
           } else {
             resolve([]);
           }
@@ -414,26 +410,28 @@ Page({
     const headers = matrix[0].map(h => h.replace(/\s/g, ''));
     const findCol = (kw) => headers.findIndex(h => kw.some(k => h.includes(k)));
 
-    const locationIdx = findCol(['库位', '货位', '位置']);
-    const specIdx     = findCol(['颜色', '尺码', '规格']);
-    const qtyIdx      = findCol(['数量', '件数', '拣货数']);
-    const skuIdx      = headers.findIndex(h => h.toUpperCase().includes('SKU'));
+    const locationIdx    = findCol(['库位', '货位', '位置']);
+    const specIdx        = findCol(['颜色', '尺码', '规格']);
+    const qtyIdx         = findCol(['数量', '件数', '拣货数']);
+    const skuIdx         = headers.findIndex(h => h.toUpperCase().includes('SKU'));
 
     const list = [];
     for (let r = 1; r <= maxRow; r++) {
       const row = matrix[r];
       if (!row || row.filter(v => v).length < 2) continue;
-      const location = locationIdx >= 0 ? row[locationIdx] : '';
+      const location = locationIdx >= 0 ? (row[locationIdx] || '').trim() : '';
       if (!location) continue;
-
-      const spec = specIdx >= 0 ? row[specIdx] : '';
-      const sku  = skuIdx  >= 0 ? row[skuIdx]  : '';
+      // ⭐ 库位必须包含大写字母
+      if (!hasUpperCase(location)) continue;
 
       list.push({
-        location, spec,
+        location,
+        spec: specIdx >= 0 ? row[specIdx] : '',
         quantity: parseInt(qtyIdx >= 0 ? row[qtyIdx] : '0') || 0,
-        sku, confirmed: false, outOfStock: false,
-        uid: makeUid({ location, spec, sku })
+        sku: skuIdx >= 0 ? row[skuIdx] : '',
+        confirmed: false,
+        outOfStock: false,
+        uid: makeUid({ location, spec: specIdx >= 0 ? row[specIdx] : '', sku: skuIdx >= 0 ? row[skuIdx] : '' })
       });
     }
     return list;
@@ -498,7 +496,6 @@ Page({
     const history = wx.getStorageSync(HISTORY_KEY) || [];
     const batch = history.find(b => b.id === batchId);
     if (!batch) return;
-
     const item = batch.items.find(i => i.uid === uid);
     if (item) {
       Object.assign(item, updates, { time: Date.now() });
@@ -558,18 +555,16 @@ Page({
     if (next === -1) {
       this.updateHistoryItem(currentBatchId, item.uid,
         { confirmed: true, outOfStock: false }, currentIndex);
-      this.setData({
-        tableData: newTable, currentItem: newTable[currentIndex], allDone: true
-      }, () => this.refreshFilteredList());
+      this.setData({ tableData: newTable, currentItem: newTable[currentIndex], allDone: true },
+        () => this.refreshFilteredList());
       this.saveState();
       wx.showToast({ title: '已全部拣货完成 🎉', icon: 'success' });
       return;
     }
     this.updateHistoryItem(currentBatchId, item.uid,
       { confirmed: true, outOfStock: false }, next);
-    this.setData({
-      tableData: newTable, currentIndex: next, currentItem: newTable[next]
-    }, () => this.refreshFilteredList());
+    this.setData({ tableData: newTable, currentIndex: next, currentItem: newTable[next] },
+      () => this.refreshFilteredList());
     this.checkAllDone(newTable);
     this.saveState();
     wx.showToast({ title: '已确认', icon: 'success' });
@@ -588,18 +583,16 @@ Page({
     if (next === -1) {
       this.updateHistoryItem(currentBatchId, item.uid,
         { confirmed: false, outOfStock: true }, currentIndex);
-      this.setData({
-        tableData: newTable, currentItem: newTable[currentIndex], allDone: true
-      }, () => this.refreshFilteredList());
+      this.setData({ tableData: newTable, currentItem: newTable[currentIndex], allDone: true },
+        () => this.refreshFilteredList());
       this.saveState();
       wx.showToast({ title: '已全部处理完成 🎉', icon: 'success' });
       return;
     }
     this.updateHistoryItem(currentBatchId, item.uid,
       { confirmed: false, outOfStock: true }, next);
-    this.setData({
-      tableData: newTable, currentIndex: next, currentItem: newTable[next]
-    }, () => this.refreshFilteredList());
+    this.setData({ tableData: newTable, currentIndex: next, currentItem: newTable[next] },
+      () => this.refreshFilteredList());
     this.checkAllDone(newTable);
     this.saveState();
     wx.showToast({ title: '已标记缺货', icon: 'none' });
