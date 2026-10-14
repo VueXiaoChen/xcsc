@@ -1,0 +1,43 @@
+<view class="container" wx:if="{{batch}}">
+  <!-- 头部信息 -->
+  <view class="header-card">
+    <view class="header-time">{{batch.timeText}}</view>
+    <view class="header-stat">
+      共 <text class="num">{{batch.total}}</text> 条 ·
+      已确认 <text class="num ok">{{batch.confirmed}}</text> 条
+      <text wx:if="{{batch.outOfStock > 0}}"> · 缺货 <text class="num oos">{{batch.outOfStock}}</text> 条</text>
+    </view>
+  </view>
+
+  <!-- 操作按钮 -->
+  <view class="actions">
+    <view class="action-btn" bindtap="copyBatch">复制全部</view>
+    <view class="action-btn danger" bindtap="deleteBatch">删除这一单</view>
+  </view>
+
+  <!-- 条目列表 -->
+  <view class="list">
+    <view class="item" wx:for="{{items}}" wx:key="uid">
+      <view class="item-header">
+        <text class="loc">{{item.location}}</text>
+        <view class="{{item.confirmed ? 'tag-ok' : (item.outOfStock ? 'tag-oos' : 'tag-pending')}}">
+          {{item.confirmed ? '已确认' : (item.outOfStock ? '缺货' : '待捡货')}}
+        </view>
+      </view>
+      <view class="item-body">
+        <view class="row">
+          <text class="label">颜色尺码</text>
+          <text class="value">{{item.spec}}</text>
+        </view>
+        <view class="row">
+          <text class="label">数量</text>
+          <text class="value qty">{{item.quantity}}</text>
+        </view>
+        <view class="row">
+          <text class="label">SKU</text>
+          <text class="value sku">{{item.sku}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

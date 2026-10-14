@@ -1,0 +1,53 @@
+<view class="container">
+  <!-- 顶部统计 -->
+  <view class="top-bar">
+    <view class="count-wrap">
+      <text class="count-num">{{batches.length}}</text>
+      <text class="count-label">次扫描</text>
+    </view>
+    <view class="btn-clear" bindtap="clearAll" wx:if="{{batches.length > 0}}">
+      清空全部
+    </view>
+  </view>
+
+  <!-- 总历史记录入口 -->
+  <view class="all-entry" bindtap="goAll">
+    <view class="all-left">
+      <view class="all-title">总历史记录</view>
+      <view class="all-sub">查看所有扫描过的商品（已去重）</view>
+    </view>
+    <view class="arrow">›</view>
+  </view>
+
+  <!-- 空状态 -->
+  <view class="empty" wx:if="{{batches.length === 0}}">
+    <view class="empty-text">还没有任何扫描记录</view>
+  </view>
+
+  <!-- 扫描批次列表 -->
+  <view
+    class="scan-item"
+    wx:for="{{batches}}"
+    wx:key="id"
+    bindtap="goDetail"
+    data-id="{{item.id}}"
+    bindlongpress="deleteBatch"
+  >
+    <view class="scan-left">
+      <view class="scan-time">{{item.timeText}}</view>
+      <view class="scan-desc">
+        共 {{item.total}} 条 · 已确认 {{item.confirmed}} 条
+      </view>
+    </view>
+    <view class="scan-right">
+      <view class="badge {{item.allDone ? 'badge-done' : 'badge-doing'}}">
+        {{item.allDone ? '已完成' : '进行中'}}
+      </view>
+      <view class="arrow">›</view>
+    </view>
+  </view>
+
+  <view class="hint" wx:if="{{batches.length > 0}}">
+    长按某一项可删除
+  </view>
+</view>
