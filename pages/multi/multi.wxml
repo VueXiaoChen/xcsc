@@ -20,54 +20,54 @@
   </view>
 
   <view class="loc-card" wx:if="{{currentLoc}}">
-    <!-- 库位头部 -->
     <view class="loc-header">
       <view class="loc-tag">库位</view>
       <view class="loc-name">{{currentLoc.location}}</view>
       <view class="loc-summary">
-        本库位共 {{currentLoc.products.length}} 种商品
+        本库位共 {{currentLoc.products.length}} 种商品 / {{currentLoc.totalItems}} 条明细
       </view>
     </view>
 
-    <!-- 商品组 -->
-    <view
-      class="product-block"
-      wx:for="{{currentLoc.products}}"
-      wx:for-item="prod"
-      wx:for-index="pi"
-      wx:key="key"
-    >
-      <!-- 商品信息：SKU + 颜色尺码（只显示一次） -->
-      <view class="product-info">
-        <view class="info-row">
-          <text class="i-label">SKU</text>
-          <text class="i-value sku">{{prod.sku}}</text>
-        </view>
-        <view class="info-row">
-          <text class="i-label">颜色/尺码</text>
-          <text class="i-value">{{prod.spec}}</text>
-        </view>
-        <view class="info-row total-row">
-          <text class="i-label">合计拣货</text>
-          <text class="i-value qty">{{prod.total}}</text>
-        </view>
-      </view>
-
-      <!-- SO 分配：每个 SO 一个横幅 + 数量 -->
-      <view class="so-list">
-        <view
-          class="so-item"
-          wx:for="{{prod.soList}}"
-          wx:for-item="so"
-          wx:for-index="si"
-          wx:key="soNumber"
-        >
-          <view class="so-banner {{si % 4 === 0 ? 'so-red' : (si % 4 === 1 ? 'so-orange' : (si % 4 === 2 ? 'so-purple' : 'so-teal'))}}">
-            📦 订单 SO: {{so.soNumber}}
+    <!-- 商品列表 -->
+    <view class="product-list">
+      <view
+        class="product-block"
+        wx:for="{{currentLoc.products}}"
+        wx:for-item="prod"
+        wx:for-index="pi"
+        wx:key="key"
+      >
+        <!-- 商品信息 -->
+        <view class="product-info">
+          <view class="info-row">
+            <text class="i-label">SKU</text>
+            <text class="i-value sku">{{prod.sku}}</text>
           </view>
-          <view class="so-qty-row">
-            <text class="so-qty-label">拣货数量</text>
-            <text class="so-qty-num">{{so.quantity}}</text>
+          <view class="info-row">
+            <text class="i-label">颜色/尺码</text>
+            <text class="i-value">{{prod.spec}}</text>
+          </view>
+          <view class="info-row total-row">
+            <text class="i-label">合计拣货</text>
+            <text class="i-value qty">{{prod.total}}</text>
+          </view>
+        </view>
+
+        <!-- SO 竖排列表：SO 号铺满整行，数量圆形嵌在右边 -->
+        <view class="so-list">
+          <view
+            class="so-row"
+            wx:for="{{prod.soList}}"
+            wx:for-item="so"
+            wx:for-index="si"
+            wx:key="soNumber"
+          >
+            <view class="so-label {{si % 4 === 0 ? 'so-red' : (si % 4 === 1 ? 'so-orange' : (si % 4 === 2 ? 'so-purple' : 'so-teal'))}}">
+              <text class="so-text">📦 {{so.soNumber}}</text>
+              <view class="so-circle">
+                <text class="so-circle-num">{{so.quantity}}</text>
+              </view>
+            </view>
           </view>
         </view>
       </view>
@@ -87,5 +87,61 @@
     </view>
   </view>
 </block>
+
+<!-- 悬浮按钮：记录（无图标） -->
+<view class="fab-thumb" bindtap="openThumbnail" wx:if="{{batches.length > 0}}">
+  <view class="fab-thumb-text">记录</view>
+  <view class="fab-thumb-badge">{{batches.length}}</view>
+</view>
+
+<!-- 缩略图弹层 -->
+<view class="thumb-modal" wx:if="{{showThumbModal}}" catchtap="closeThumbnail">
+  <view class="thumb-panel" catchtap="noop">
+    <view class="thumb-header">
+      <view class="thumb-title">扫描记录</view>
+      <view class="thumb-close" bindtap="closeThumbnail">×</view>
+    </view>
+
+    <scroll-view scroll-y="true" class="thumb-scroll">
+      <block wx:if="{{handledBatches.length > 0}}">
+        <view class="thumb-section-title">✅ 已处理 ({{handledBatches.length}})</view>
+        <view class="thumb-grid">
+          <view
+            class="thumb-cell"
+            wx:for="{{handledBatches}}"
+            wx:key="imagePath"
+            bindtap="previewImage"
+            data-index="{{index}}"
+            data-group="handled"
+          >
+            <image class="thumb-img" src="{{item.imagePath}}" mode="aspectFill" />
+            <view class="thumb-tag thumb-tag-done">{{item.soNumber}}</view>
+          </view>
+        </view>
+      </block>
+
+      <block wx:if="{{unhandledBatches.length > 0}}">
+        <view class="thumb-section-title">⏳ 未处理 ({{unhandledBatches.length}})</view>
+        <view class="thumb-grid">
+          <view
+            class="thumb-cell"
+            wx:for="{{unhandledBatches}}"
+            wx:key="imagePath"
+            bindtap="previewImage"
+            data-index="{{index}}"
+            data-group="unhandled"
+          >
+            <image class="thumb-img" src="{{item.imagePath}}" mode="aspectFill" />
+            <view class="thumb-tag thumb-tag-pending">{{item.soNumber}}</view>
+          </view>
+        </view>
+      </block>
+
+      <view class="thumb-empty" wx:if="{{handledBatches.length === 0 && unhandledBatches.length === 0}}">
+        暂无扫描记录
+      </view>
+    </scroll-view>
+  </view>
+</view>
 
 </view>

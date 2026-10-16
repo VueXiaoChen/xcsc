@@ -1,7 +1,7 @@
 {
   "miniVersion": "v2",
   "name": "小陈扫描",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "versionCode": 100,
   "i18nFilePath": "i18n",
   "mini-ohos": {
@@ -45,7 +45,7 @@
       "WeAppLBS": false,
       "WeAppOthers": false
     },
-    "enableVConsole": "open",
+    "enableVConsole": "close",
     "icons": {
       "mainIcon120": "",
       "mainIcon180": "",

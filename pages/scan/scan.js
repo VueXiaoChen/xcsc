@@ -60,6 +60,179 @@ function isHandled(item) {
   return !!item.confirmed || !!item.outOfStock;
 }
 
+// ⭐ 从通用识别结果重建表格
+function parseGeneralResult(textDetections) {
+  if (!textDetections || textDetections.length === 0) return [];
+
+  const blocks = textDetections.map(t => {
+    const poly = t.Polygon || [];
+    const xs = poly.map(p => p.X);
+    const ys = poly.map(p => p.Y);
+    const cx = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const cy = ys.reduce((a, b) => a + b, 0) / ys.length;
+    return { text: (t.DetectedText || '').trim(), cx, cy };
+  }).filter(b => b.text);
+
+  if (blocks.length === 0) return [];
+
+  const headerKeywords = ['拣货库位', '库位', '货号', 'SKU', '拣货数量', '数量', '颜色'];
+  const headerWords = ['SKU', '拣货库位', '库位', '货号', '颜色_尺码', '拣货数量', '产品类别', '颜色尺码', '规格'];
+
+  const headerBlocks = blocks.filter(b =>
+    headerKeywords.some(k => b.text.includes(k))
+  );
+
+  if (headerBlocks.length < 3) {
+    console.log('[parseGeneral] 表头太少，走旧逻辑');
+    return legacyParse(blocks);
+  }
+
+  const headerYs = headerBlocks.map(b => b.cy).sort((a, b) => a - b);
+  const headerY = headerYs[Math.floor(headerYs.length / 2)];
+  console.log('[parseGeneral] 表头基准 Y:', Math.round(headerY));
+
+  const headerRowBlocks = blocks.filter(b => Math.abs(b.cy - headerY) < 30);
+
+  const colMap = {};
+  headerRowBlocks.forEach(b => {
+    const text = b.text;
+    if (/拣货库位|^库位$|货位|位置/.test(text)) colMap.location = b.cx;
+    else if (/货号|^编码$|商品编码/.test(text)) colMap.productCode = b.cx;
+    else if (/颜色|尺码|规格/.test(text)) colMap.spec = b.cx;
+    else if (/拣货数量|^数量$|件数/.test(text)) colMap.quantity = b.cx;
+    else if (/SKU/i.test(text)) colMap.sku = b.cx;
+  });
+
+  console.log('[parseGeneral] 列锚点:', JSON.stringify(colMap));
+
+  const dataBlocks = blocks.filter(b => b.cy > headerY + 10);
+
+  const columns = {};
+
+  Object.keys(colMap).forEach(col => {
+    const colX = colMap[col];
+    const list = dataBlocks.filter(b => {
+      if (headerWords.includes(b.text)) return false;
+      if (Math.abs(b.cx - colX) > 130) return false;
+      return true;
+    }).sort((a, b) => a.cy - b.cy);
+
+    columns[col] = list;
+    console.log(`[parseGeneral] 列 "${col}" (x=${Math.round(colX)}) 候选:`, list.map(b => `${b.text}@${Math.round(b.cy)}`).join(' / '));
+  });
+
+  const locList = columns.location || [];
+  if (locList.length === 0) return [];
+
+  const rowCount = locList.length;
+  console.log('[parseGeneral] 总行数:', rowCount);
+
+  const rowDataList = [];
+  for (let i = 0; i < rowCount; i++) {
+    const rowData = {
+      location: locList[i] ? locList[i].text : '',
+      productCode: '',
+      spec: '',
+      quantity: '',
+      sku: ''
+    };
+
+    ['productCode', 'spec', 'quantity', 'sku'].forEach(col => {
+      const list = columns[col] || [];
+      const rowY = locList[i].cy;
+      let best = null;
+      let bestDist = Infinity;
+      list.forEach(item => {
+        const d = Math.abs(item.cy - rowY);
+        if (d < bestDist) {
+          bestDist = d;
+          best = item;
+        }
+      });
+
+      if (!best || bestDist > 120) {
+        best = list[i] || null;
+      }
+
+      if (best) {
+        rowData[col] = best.text;
+        const idx = list.indexOf(best);
+        if (idx >= 0) list.splice(idx, 1);
+      }
+    });
+
+    rowDataList.push(rowData);
+  }
+
+  console.log('[parseGeneral] 结构化行:');
+  rowDataList.forEach((r, i) => {
+    console.log(`  行 ${i + 1}: 库位=${r.location} 货号=${r.productCode} 规格=${r.spec} 数量=${r.quantity} SKU=${r.sku}`);
+  });
+
+  return rowDataList;
+}
+
+function legacyParse(blocks) {
+  blocks.sort((a, b) => a.cy - b.cy);
+  const rows = [];
+  let currentRow = [blocks[0]];
+
+  for (let i = 1; i < blocks.length; i++) {
+    const b = blocks[i];
+    const prevRow = currentRow[0];
+    if (Math.abs(b.cy - prevRow.cy) < 15) {
+      currentRow.push(b);
+    } else {
+      rows.push(currentRow);
+      currentRow = [b];
+    }
+  }
+  if (currentRow.length > 0) rows.push(currentRow);
+
+  rows.forEach(r => r.sort((a, b) => a.cx - b.cx));
+  return rows;
+}
+
+function extractItemsFromRows(rows) {
+  if (rows.length > 0 && Array.isArray(rows[0])) {
+    const items = [];
+    rows.forEach(row => {
+      if (row.length < 2) return;
+      const locCell = row.find(cell =>
+        /[A-Z]/.test(cell.text) && /-/.test(cell.text) &&
+        cell.text.length >= 5 && cell.text.length <= 25
+      );
+      if (!locCell) return;
+      const location = locCell.text.toUpperCase();
+      const qtyCell = row.find(cell => /^\d{1,4}$/.test(cell.text) && cell.cx > locCell.cx);
+      const skuCell = row.find(cell =>
+        cell.text.length >= 8 && /[A-Z]/.test(cell.text) && /\d/.test(cell.text) &&
+        cell.text !== locCell.text && (!qtyCell || cell.text !== qtyCell.text)
+      );
+      const specCell = row.find(cell =>
+        /[\u4e00-\u9fa5]/.test(cell.text) &&
+        cell !== locCell && cell !== skuCell && cell !== qtyCell
+      );
+      items.push({
+        location,
+        spec: specCell ? specCell.text : '',
+        quantity: qtyCell ? parseInt(qtyCell.text) : 0,
+        sku: skuCell ? skuCell.text : ''
+      });
+    });
+    return items;
+  }
+
+  return rows
+    .filter(r => r.location && hasUpperCase(r.location))
+    .map(r => ({
+      location: r.location.toUpperCase().trim(),
+      spec: r.spec || '',
+      quantity: parseInt(r.quantity) || 0,
+      sku: r.sku || ''
+    }));
+}
+
 Page({
   data: {
     loading: false,
@@ -167,9 +340,7 @@ Page({
       success: (res) => {
         const files = res.tempFiles.map(f => f.tempFilePath);
         if (files.length === 0) return;
-        wx.showLoading({ title: '图像处理中...' });
         this.processAll(files).then(processed => {
-          wx.hideLoading();
           this.recognizeAll(processed);
         }).catch(err => {
           wx.hideLoading();
@@ -180,24 +351,30 @@ Page({
     });
   },
 
+  // ⭐ 不调 compressImage，直接 preprocessImage（已加超时保护）
   async processAll(files) {
     const result = [];
     for (let i = 0; i < files.length; i++) {
       wx.showLoading({ title: `处理第 ${i + 1}/${files.length} 张...` });
+
+      let processedPath = files[i];
       try {
-        const compressed = await new Promise((resolve) => {
-          wx.compressImage({
-            src: files[i], quality: 85,
-            success: (r) => resolve(r.tempFilePath),
-            fail: () => resolve(files[i])
-          });
-        });
-        const processed = await preprocessImage(compressed);
-        result.push(processed);
+        const p = await Promise.race([
+          preprocessImage(files[i]),
+          new Promise((resolve) => setTimeout(() => {
+            console.warn('preprocessImage 外层超时，用原图');
+            resolve(files[i]);
+          }, 10000))
+        ]);
+        if (p) processedPath = p;
       } catch (e) {
-        result.push(files[i]);
+        console.warn('预处理异常，用原图', e);
       }
+
+      console.log(`第 ${i + 1} 张处理完成:`, processedPath);
+      result.push(processedPath);
     }
+    wx.hideLoading();
     return result;
   },
 
@@ -219,11 +396,10 @@ Page({
     }
     wx.hideLoading();
 
-    // ⭐ 无有效库位则提示返回
     if (allItems.length === 0) {
       wx.showModal({
         title: '未识别到有效库位',
-        content: '这张单子上没有识别到包含大写字母的库位，请检查拍摄是否清晰，或换一张重试。',
+        content: '没有识别到包含大写字母的库位，请检查拍摄是否清晰，或换一张重试。',
         showCancel: false,
         confirmText: '返回',
         success: () => {
@@ -313,20 +489,86 @@ Page({
     }));
   },
 
-  recognizeOne(filePath) {
-    return new Promise((resolve, reject) => {
-      const cfg = wx.getStorageSync('tc_secret_config');
-      const secretId = (cfg && cfg.secretId) || 'AKIDGXceU6VkmdHixzoQtoW5VikbFkw9HPch';
-      const secretKey = (cfg && cfg.secretKey) || 'BKWXN1Tr58ydR7ey99xYMybCexAC1gFj';
+  async recognizeOne(filePath) {
+    const cfg = wx.getStorageSync('tc_secret_config');
+    const secretId = (cfg && cfg.secretId) || 'AKIDGXceU6VkmdHixzoQtoW5VikbFkw9HPch';
+    const secretKey = (cfg && cfg.secretKey) || 'BKWXN1Tr58ydR7ey99xYMybCexAC1gFj';
 
+    // ⭐ 读文件带兜底
+    let base64Img = '';
+    try {
       const fs = wx.getFileSystemManager();
-      let base64Img;
-      try { base64Img = fs.readFileSync(filePath, 'base64'); }
-      catch (e) { return reject(e); }
+      base64Img = fs.readFileSync(filePath, 'base64');
+    } catch (e) {
+      console.warn('readFileSync 失败，尝试 readFile:', e);
+      try {
+        base64Img = await new Promise((resolve, reject) => {
+          wx.getFileSystemManager().readFile({
+            filePath: filePath,
+            encoding: 'base64',
+            success: (r) => resolve(r.data),
+            fail: reject
+          });
+        });
+      } catch (e2) {
+        console.error('读文件兜底也失败:', e2);
+        return [];
+      }
+    }
 
+    if (!base64Img || base64Img.length < 100) {
+      console.warn('base64 数据为空');
+      return [];
+    }
+
+    console.log('\n========== [scan] 开始识别一张图片 ==========');
+    console.log('base64 长度:', base64Img.length);
+
+    let items = [];
+
+    // 表格识别
+    console.log('\n---------- 第 1 步：表格识别 ----------');
+    try {
+      const tableRes = await this.callOCR(secretId, secretKey, 'RecognizeTableAccurateOCR', base64Img);
+      items = this.parseTable(tableRes);
+      console.log('表格识别解析出条目数:', items.length);
+    } catch (e) {
+      console.warn('表格识别失败:', e);
+    }
+
+    // 降级通用识别
+    if (items.length === 0) {
+      console.log('\n---------- 第 2 步：降级通用识别 ----------');
+      try {
+        const generalRes = await this.callOCR(secretId, secretKey, 'GeneralAccurateOCR', base64Img);
+        const detections = generalRes.TextDetections || [];
+        console.log('TextDetections 数量:', detections.length);
+
+        const rows = parseGeneralResult(detections);
+        items = extractItemsFromRows(rows);
+        console.log('提取条目数:', items.length);
+      } catch (e) {
+        console.warn('通用识别失败:', e);
+      }
+    }
+
+    const valid = items
+      .filter(i => hasUpperCase(i.location))
+      .map(i => ({
+        ...i,
+        confirmed: false,
+        outOfStock: false,
+        uid: makeUid({ location: i.location, spec: i.spec, sku: i.sku })
+      }));
+
+    console.log('最终有效条目数:', valid.length);
+    return valid;
+  },
+
+  callOCR(secretId, secretKey, action, base64Img) {
+    return new Promise((resolve, reject) => {
       const endpoint = 'ocr.tencentcloudapi.com';
       const service = 'ocr';
-      const action = 'RecognizeTableAccurateOCR';
       const version = '2018-11-19';
       const region = 'ap-guangzhou';
 
@@ -335,6 +577,12 @@ Page({
       const authorization = crypto.generateAuthorization(
         secretId, secretKey, endpoint, service, action, version, region, payload, timestamp
       );
+
+      // ⭐ 请求超时保护：30 秒
+      const timer = setTimeout(() => {
+        console.warn(`[callOCR] ${action} 请求超时 30s`);
+        reject(new Error('OCR 请求超时'));
+      }, 30000);
 
       wx.request({
         url: `https://${endpoint}`,
@@ -350,36 +598,25 @@ Page({
         },
         data: payload,
         success: (res) => {
+          clearTimeout(timer);
           if (res.data.Response && res.data.Response.Error) {
-            const code = res.data.Response.Error.Code || '';
-            if (code.startsWith('AuthFailure')) {
-              wx.showModal({
-                title: '密钥验证失败',
-                content: res.data.Response.Error.Message,
-                showCancel: false
-              });
-            }
             return reject(new Error(res.data.Response.Error.Message));
           }
-          if (res.data.Response &&
-              res.data.Response.TableDetections &&
-              res.data.Response.TableDetections.length > 0) {
-            try {
-              const items = this.parseOne(res.data.Response.TableDetections);
-              // ⭐ 只保留库位含大写字母的行
-              const valid = items.filter(i => hasUpperCase(i.location));
-              resolve(valid);
-            } catch (e) { reject(e); }
-          } else {
-            resolve([]);
-          }
+          resolve(res.data.Response);
         },
-        fail: (err) => reject(err)
+        fail: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        }
       });
     });
   },
 
-  parseOne(tableDetections) {
+  parseTable(response) {
+    if (!response || !response.TableDetections || response.TableDetections.length === 0) {
+      return [];
+    }
+    const tableDetections = response.TableDetections;
     let mainTable = tableDetections.reduce((max, cur) => {
       const a = (cur.Cells && cur.Cells.length) || 0;
       const b = (max.Cells && max.Cells.length) || 0;
@@ -421,17 +658,13 @@ Page({
       if (!row || row.filter(v => v).length < 2) continue;
       const location = locationIdx >= 0 ? (row[locationIdx] || '').trim() : '';
       if (!location) continue;
-      // ⭐ 库位必须包含大写字母
       if (!hasUpperCase(location)) continue;
 
       list.push({
         location,
         spec: specIdx >= 0 ? row[specIdx] : '',
         quantity: parseInt(qtyIdx >= 0 ? row[qtyIdx] : '0') || 0,
-        sku: skuIdx >= 0 ? row[skuIdx] : '',
-        confirmed: false,
-        outOfStock: false,
-        uid: makeUid({ location, spec: specIdx >= 0 ? row[specIdx] : '', sku: skuIdx >= 0 ? row[skuIdx] : '' })
+        sku: skuIdx >= 0 ? row[skuIdx] : ''
       });
     }
     return list;

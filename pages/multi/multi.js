@@ -11,6 +11,188 @@ function hasUpperCase(str) {
   return /[A-Z]/.test(str || '');
 }
 
+// ⭐ 从通用识别结果重建表格（每一列独立收集，按 Y 依次分配给每一行）
+function parseGeneralResult(textDetections) {
+  if (!textDetections || textDetections.length === 0) return [];
+
+  const blocks = textDetections.map(t => {
+    const poly = t.Polygon || [];
+    const xs = poly.map(p => p.X);
+    const ys = poly.map(p => p.Y);
+    const cx = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const cy = ys.reduce((a, b) => a + b, 0) / ys.length;
+    return { text: (t.DetectedText || '').trim(), cx, cy };
+  }).filter(b => b.text);
+
+  if (blocks.length === 0) return [];
+
+  const headerKeywords = ['拣货库位', '库位', '货号', 'SKU', '拣货数量', '数量', '颜色'];
+  const headerWords = ['SKU', '拣货库位', '库位', '货号', '颜色_尺码', '拣货数量', '产品类别', '颜色尺码', '规格'];
+
+  const headerBlocks = blocks.filter(b =>
+    headerKeywords.some(k => b.text.includes(k))
+  );
+
+  if (headerBlocks.length < 3) {
+    console.log('[parseGeneral] 表头太少，走旧逻辑');
+    return legacyParse(blocks);
+  }
+
+  const headerYs = headerBlocks.map(b => b.cy).sort((a, b) => a - b);
+  const headerY = headerYs[Math.floor(headerYs.length / 2)];
+  console.log('[parseGeneral] 表头基准 Y:', Math.round(headerY));
+
+  const headerRowBlocks = blocks.filter(b => Math.abs(b.cy - headerY) < 30);
+
+  const colMap = {};
+  headerRowBlocks.forEach(b => {
+    const text = b.text;
+    if (/拣货库位|^库位$|货位|位置/.test(text)) colMap.location = b.cx;
+    else if (/货号|^编码$|商品编码/.test(text)) colMap.productCode = b.cx;
+    else if (/颜色|尺码|规格/.test(text)) colMap.spec = b.cx;
+    else if (/拣货数量|^数量$|件数/.test(text)) colMap.quantity = b.cx;
+    else if (/SKU/i.test(text)) colMap.sku = b.cx;
+  });
+
+  console.log('[parseGeneral] 列锚点:', JSON.stringify(colMap));
+
+  // 只取表头下方的数据块
+  const dataBlocks = blocks.filter(b => b.cy > headerY + 10);
+
+  // ⭐ 每一列独立收集，按 Y 排序
+  const columns = {};
+
+  Object.keys(colMap).forEach(col => {
+    const colX = colMap[col];
+    const list = dataBlocks.filter(b => {
+      if (headerWords.includes(b.text)) return false;
+      if (Math.abs(b.cx - colX) > 130) return false;
+      return true;
+    }).sort((a, b) => a.cy - b.cy);
+
+    columns[col] = list;
+    console.log(`[parseGeneral] 列 "${col}" (x=${Math.round(colX)}) 候选:`, list.map(b => `${b.text}@${Math.round(b.cy)}`).join(' / '));
+  });
+
+  // ⭐ 用"库位"列的数量作为总行数
+  const locList = columns.location || [];
+  if (locList.length === 0) return [];
+
+  const rowCount = locList.length;
+  console.log('[parseGeneral] 总行数:', rowCount);
+
+  // ⭐ 每一列的第 i 个值，配到第 i 行
+  const rowDataList = [];
+  for (let i = 0; i < rowCount; i++) {
+    const rowData = {
+      location: locList[i] ? locList[i].text : '',
+      productCode: '',
+      spec: '',
+      quantity: '',
+      sku: ''
+    };
+
+    ['productCode', 'spec', 'quantity', 'sku'].forEach(col => {
+      const list = columns[col] || [];
+      // 优先取 Y 与当前库位最接近的那一个
+      const rowY = locList[i].cy;
+      let best = null;
+      let bestDist = Infinity;
+      list.forEach(item => {
+        const d = Math.abs(item.cy - rowY);
+        if (d < bestDist) {
+          bestDist = d;
+          best = item;
+        }
+      });
+
+      // 兜底：如果找不到最近的，就用第 i 个
+      if (!best || bestDist > 120) {
+        best = list[i] || null;
+      }
+
+      if (best) {
+        rowData[col] = best.text;
+        const idx = list.indexOf(best);
+        if (idx >= 0) list.splice(idx, 1);
+      }
+    });
+
+    rowDataList.push(rowData);
+  }
+
+  console.log('[parseGeneral] 结构化行:');
+  rowDataList.forEach((r, i) => {
+    console.log(`  行 ${i + 1}: 库位=${r.location} 货号=${r.productCode} 规格=${r.spec} 数量=${r.quantity} SKU=${r.sku}`);
+  });
+
+  return rowDataList;
+}
+
+// 旧版简单聚类（兜底）
+function legacyParse(blocks) {
+  blocks.sort((a, b) => a.cy - b.cy);
+  const rows = [];
+  let currentRow = [blocks[0]];
+
+  for (let i = 1; i < blocks.length; i++) {
+    const b = blocks[i];
+    const prevRow = currentRow[0];
+    if (Math.abs(b.cy - prevRow.cy) < 15) {
+      currentRow.push(b);
+    } else {
+      rows.push(currentRow);
+      currentRow = [b];
+    }
+  }
+  if (currentRow.length > 0) rows.push(currentRow);
+
+  rows.forEach(r => r.sort((a, b) => a.cx - b.cx));
+  return rows;
+}
+
+// ⭐ 从"结构化行"里提取条目
+function extractItemsFromRows(rows) {
+  // 兼容 legacyParse 返回格式
+  if (rows.length > 0 && Array.isArray(rows[0])) {
+    const items = [];
+    rows.forEach(row => {
+      if (row.length < 2) return;
+      const locCell = row.find(cell =>
+        /[A-Z]/.test(cell.text) && /-/.test(cell.text) &&
+        cell.text.length >= 5 && cell.text.length <= 25
+      );
+      if (!locCell) return;
+      const location = locCell.text.toUpperCase();
+      const qtyCell = row.find(cell => /^\d{1,4}$/.test(cell.text) && cell.cx > locCell.cx);
+      const skuCell = row.find(cell =>
+        cell.text.length >= 8 && /[A-Z]/.test(cell.text) && /\d/.test(cell.text) &&
+        cell.text !== locCell.text && (!qtyCell || cell.text !== qtyCell.text)
+      );
+      const specCell = row.find(cell =>
+        /[\u4e00-\u9fa5]/.test(cell.text) &&
+        cell !== locCell && cell !== skuCell && cell !== qtyCell
+      );
+      items.push({
+        location,
+        spec: specCell ? specCell.text : '',
+        quantity: qtyCell ? parseInt(qtyCell.text) : 0,
+        sku: skuCell ? skuCell.text : ''
+      });
+    });
+    return items;
+  }
+
+  return rows
+    .filter(r => r.location && hasUpperCase(r.location))
+    .map(r => ({
+      location: r.location.toUpperCase().trim(),
+      spec: r.spec || '',
+      quantity: parseInt(r.quantity) || 0,
+      sku: r.sku || ''
+    }));
+}
+
 Page({
   data: {
     loading: false,
@@ -25,13 +207,8 @@ Page({
     currentBatchId: ''
   },
 
-  onLoad() {
-    this.restoreState(true);
-  },
-
-  onShow() {
-    this.restoreState(false);
-  },
+  onLoad() { this.restoreState(true); },
+  onShow() { this.restoreState(false); },
 
   restoreState(cleanIfDone) {
     const state = wx.getStorageSync(STATE_KEY);
@@ -69,7 +246,6 @@ Page({
     });
   },
 
-  // ============ 历史记录 ============
   saveBatchToAllItems() {
     const { batches } = this.data;
     if (!batches.length) return;
@@ -183,7 +359,6 @@ Page({
     wx.setStorageSync(ALL_ITEMS_KEY, Object.values(map));
   },
 
-  // ============ 缩略图分组 ============
   refreshThumbGroups() {
     const { batches, grouped } = this.data;
 
@@ -229,7 +404,6 @@ Page({
     wx.previewImage({ current: urls[index], urls });
   },
 
-  // ============ 上传 ============
   chooseAndRecognize() {
     wx.chooseMedia({
       count: 9,
@@ -245,7 +419,6 @@ Page({
 
   async processSequentially(files, idx, accumulated) {
     if (idx >= files.length) {
-      // ⭐ 校验是否有含大写字母的库位
       const hasValid = accumulated.some(batch =>
         batch.items.some(item => hasUpperCase(item.location))
       );
@@ -350,18 +523,82 @@ Page({
     const fs = wx.getFileSystemManager();
     const base64Img = fs.readFileSync(filePath, 'base64');
 
-    const [tableRes, generalRes] = await Promise.all([
-      this.callOCR(secretId, secretKey, 'RecognizeTableAccurateOCR', base64Img),
-      this.callOCR(secretId, secretKey, 'GeneralAccurateOCR', base64Img)
-    ]);
+    console.log('\n\n========== 开始识别一张图片 ==========');
+    console.log('图片大小(base64长度):', base64Img.length);
 
-    const items = this.parseTable(tableRes);
-    // ⭐ 只保留库位含大写字母的行
+    let items = [];
+    let soNumber = '';
+
+    console.log('\n---------- 第 1 步：表格识别 RecognizeTableAccurateOCR ----------');
+    try {
+      const tableRes = await this.callOCR(secretId, secretKey, 'RecognizeTableAccurateOCR', base64Img);
+      if (tableRes.Error) {
+        console.log('表格识别接口返回错误:', tableRes.Error);
+      } else {
+        console.log('TableDetections 数量:', (tableRes.TableDetections || []).length);
+      }
+      items = this.parseTable(tableRes);
+      console.log('表格识别解析出条目数:', items.length);
+    } catch (e) {
+      console.warn('表格识别失败:', e);
+    }
+
+    if (items.length === 0) {
+      console.log('\n---------- 第 2 步：降级通用识别 GeneralAccurateOCR ----------');
+      try {
+        const generalRes = await this.callOCR(secretId, secretKey, 'GeneralAccurateOCR', base64Img);
+
+        if (generalRes.Error) {
+          console.log('通用识别接口返回错误:', generalRes.Error);
+        } else {
+          const detections = generalRes.TextDetections || [];
+          console.log('TextDetections 数量:', detections.length);
+
+          console.log('\n========== 通用识别原始返回 ==========');
+          detections.forEach((t, i) => {
+            const poly = t.Polygon || [];
+            const xs = poly.map(p => p.X);
+            const ys = poly.map(p => p.Y);
+            const cx = xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0;
+            const cy = ys.length ? Math.round(ys.reduce((a, b) => a + b, 0) / ys.length) : 0;
+            console.log(`  [${i}] "${t.DetectedText}"  (x=${cx}, y=${cy})`);
+          });
+
+          const rows = parseGeneralResult(detections);
+          items = extractItemsFromRows(rows);
+          soNumber = this.extractSO(generalRes);
+
+          console.log('\n========== 从结构化行里提取的条目 ==========');
+          console.log('提取条目数:', items.length);
+          items.forEach((it, i) => {
+            console.log(`  条目 ${i + 1}: 库位=${it.location} 规格=${it.spec} 数量=${it.quantity} SKU=${it.sku}`);
+          });
+          console.log('识别出的 SO 号:', soNumber || '(未识别到)');
+        }
+      } catch (e) {
+        console.warn('通用识别失败:', e);
+      }
+    } else {
+      console.log('\n---------- 表格识别成功，额外调通用识别抓 SO 号 ----------');
+      try {
+        const generalRes = await this.callOCR(secretId, secretKey, 'GeneralAccurateOCR', base64Img);
+        soNumber = this.extractSO(generalRes);
+        console.log('识别出的 SO 号:', soNumber || '(未识别到)');
+      } catch (e) {
+        console.warn('抓 SO 号失败:', e);
+      }
+    }
+
     const valid = items.filter(i => hasUpperCase(i.location));
+    console.log('\n========== 最终有效条目 ==========');
+    console.log('有效条目数:', valid.length);
+    valid.forEach((it, i) => {
+      console.log(`  ${i + 1}. 库位=${it.location} 规格=${it.spec} 数量=${it.quantity} SKU=${it.sku}`);
+    });
 
     return {
       items: valid,
-      soNumber: this.extractSO(generalRes)
+      soNumber
     };
   },
 
@@ -462,7 +699,6 @@ Page({
       if (!row || row.filter(v => v).length < 2) continue;
       const location = locationIdx >= 0 ? (row[locationIdx] || '').trim() : '';
       if (!location) continue;
-      // ⭐ 库位必须包含大写字母
       if (!hasUpperCase(location)) continue;
 
       list.push({
